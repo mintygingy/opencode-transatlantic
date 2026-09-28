@@ -986,150 +986,138 @@ var tui_default = Plugin.define({
     const keep = (d2) => {
       if (typeof d2 === "function") disposers.push(d2);
     };
-    try {
-      keep(
-        context.ui.slot({
-          append: "sidebar.footer",
-          render: (props) => /* @__PURE__ */ jsx(AliasBadge, { sessionID: props?.sessionID })
-        })
-      );
-    } catch (e) {
-      console.error("[transatlantic] sidebar slot failed", e);
-    }
-    try {
-      keep(
-        context.ui.slot({
-          append: "prompt.footer.status",
-          render: (props) => /* @__PURE__ */ jsx(AliasBadge, { sessionID: props?.sessionID })
-        })
-      );
-    } catch (e) {
-      console.error("[transatlantic] status slot failed", e);
-    }
-    try {
-      keep(
-        context.keymap.layer(() => ({
-          mode: "global",
-          commands: [
-            {
-              id: "transatlantic.peers",
-              title: "Transatlantic: peers",
-              group: "Transatlantic",
-              palette: true,
-              slash: { name: "ta_peers" },
-              run: async () => {
-                const ta = context.client.rpc(Transatlantic);
-                const { peers } = await ta.peers({});
-                if (!peers?.length) {
-                  context.ui.toast.show({ message: "no peers. claim a name: /ta_register <alias>" });
-                  return;
-                }
-                const picked = await context.ui.dialog.select({
-                  title: "peers",
-                  options: peers.map((p) => ({
-                    title: p.alias,
-                    value: p.alias,
-                    description: `${p.pwd} \xB7 ${p.session.slice(0, 6)}\u2026${p.session.slice(-3)}${p.alive ? "" : " \xB7 GONE"}`
-                  }))
-                });
-                if (!picked) return;
-                const peer = peers.find((p) => p.alias === picked);
-                if (!peer) return;
-                const me2 = context.ui.router.current();
-                const mySession = me2?.type === "session" ? me2.sessionID : void 0;
-                if (!peer.alive) {
-                  context.ui.toast.show({
-                    message: `owner of ${peer.alias} is gone. claim it: /ta_register ${peer.alias}`
-                  });
-                  return;
-                }
-                if (!mySession || peer.session !== mySession) {
-                  context.ui.toast.show({ message: `${peer.alias} belongs to another live session.` });
-                  return;
-                }
-                const yes = await context.ui.dialog.confirm({
-                  title: `release ${peer.alias}?`,
-                  message: "other sessions will no longer reach you by this name.",
-                  label: { confirm: "release", cancel: "keep" }
-                });
-                if (!yes) return;
-                const r = await ta.releaseAlias({ alias: peer.alias, sessionID: mySession });
-                context.ui.toast.show({ message: r.message, variant: r.ok ? "success" : "error" });
+    keep(
+      context.ui.slot({
+        append: "sidebar.footer",
+        render: (props) => /* @__PURE__ */ jsx(AliasBadge, { sessionID: props?.sessionID })
+      })
+    );
+    keep(
+      context.ui.slot({
+        append: "prompt.footer.status",
+        render: (props) => /* @__PURE__ */ jsx(AliasBadge, { sessionID: props?.sessionID })
+      })
+    );
+    keep(
+      context.keymap.layer(() => ({
+        mode: "global",
+        commands: [
+          {
+            id: "transatlantic.peers",
+            title: "Transatlantic: peers",
+            group: "Transatlantic",
+            palette: true,
+            slash: { name: "ta_peers" },
+            run: async () => {
+              const ta = context.client.rpc(Transatlantic);
+              const { peers } = await ta.peers({});
+              if (!peers?.length) {
+                context.ui.toast.show({ message: "no peers. claim a name: /ta_register <alias>" });
+                return;
               }
-            },
-            {
-              id: "transatlantic.whoami",
-              title: "Transatlantic: whoami",
-              group: "Transatlantic",
-              palette: true,
-              slash: { name: "ta_whoami" },
-              run: async () => {
-                const me2 = context.ui.router.current();
-                if (me2?.type !== "session") {
-                  context.ui.toast.show({ message: "open a session first." });
-                  return;
-                }
-                const ta = context.client.rpc(Transatlantic);
-                const r = await ta.lookup({ sessionID: me2.sessionID });
+              const picked = await context.ui.dialog.select({
+                title: "peers",
+                options: peers.map((p) => ({
+                  title: p.alias,
+                  value: p.alias,
+                  description: `${p.pwd} \xB7 ${p.session.slice(0, 6)}\u2026${p.session.slice(-3)}${p.alive ? "" : " \xB7 GONE"}`
+                }))
+              });
+              if (!picked) return;
+              const peer = peers.find((p) => p.alias === picked);
+              if (!peer) return;
+              const me2 = context.ui.router.current();
+              const mySession = me2?.type === "session" ? me2.sessionID : void 0;
+              if (!peer.alive) {
                 context.ui.toast.show({
-                  message: r?.alias ? `alias: ${r.alias}` : "no alias. claim one: /ta_register <alias>"
+                  message: `owner of ${peer.alias} is gone. claim it: /ta_register ${peer.alias}`
                 });
+                return;
               }
-            },
-            {
-              id: "transatlantic.register",
-              title: "Transatlantic: register",
-              group: "Transatlantic",
-              palette: true,
-              slash: { name: "ta_register", arguments: true },
-              run: async (input) => {
-                const me2 = context.ui.router.current();
-                if (me2?.type !== "session") {
-                  context.ui.toast.show({ message: "open a session first." });
-                  return;
-                }
-                const typed = typeof input === "string" ? input.trim().toLowerCase() : "";
-                const alias = typed || (await context.ui.dialog.prompt({ title: "alias", placeholder: "backend" }))?.trim().toLowerCase();
-                if (!alias) return;
-                const ta = context.client.rpc(Transatlantic);
-                const r = await ta.claim({ alias, sessionID: me2.sessionID });
-                context.ui.toast.show({ message: r.message, variant: r.ok ? "success" : "error" });
+              if (!mySession || peer.session !== mySession) {
+                context.ui.toast.show({ message: `${peer.alias} belongs to another live session.` });
+                return;
               }
-            },
-            {
-              id: "transatlantic.unregister",
-              title: "Transatlantic: unregister",
-              group: "Transatlantic",
-              palette: true,
-              slash: { name: "ta_unregister" },
-              run: async () => {
-                const me2 = context.ui.router.current();
-                if (me2?.type !== "session") {
-                  context.ui.toast.show({ message: "open a session first." });
-                  return;
-                }
-                const ta = context.client.rpc(Transatlantic);
-                const mine = await ta.lookup({ sessionID: me2.sessionID });
-                if (!mine?.alias) {
-                  context.ui.toast.show({ message: "this session has no alias." });
-                  return;
-                }
-                const yes = await context.ui.dialog.confirm({
-                  title: `release ${mine.alias}?`,
-                  message: "other sessions will no longer reach you by this name.",
-                  label: { confirm: "release", cancel: "keep" }
-                });
-                if (!yes) return;
-                const r = await ta.releaseAlias({ alias: mine.alias, sessionID: me2.sessionID });
-                context.ui.toast.show({ message: r.message, variant: r.ok ? "success" : "error" });
-              }
+              const yes = await context.ui.dialog.confirm({
+                title: `release ${peer.alias}?`,
+                message: "other sessions will no longer reach you by this name.",
+                label: { confirm: "release", cancel: "keep" }
+              });
+              if (!yes) return;
+              const r = await ta.releaseAlias({ alias: peer.alias, sessionID: mySession });
+              context.ui.toast.show({ message: r.message, variant: r.ok ? "success" : "error" });
             }
-          ]
-        }))
-      );
-    } catch (e) {
-      console.error("[transatlantic] keymap layer failed", e);
-    }
+          },
+          {
+            id: "transatlantic.whoami",
+            title: "Transatlantic: whoami",
+            group: "Transatlantic",
+            palette: true,
+            slash: { name: "ta_whoami" },
+            run: async () => {
+              const me2 = context.ui.router.current();
+              if (me2?.type !== "session") {
+                context.ui.toast.show({ message: "open a session first." });
+                return;
+              }
+              const ta = context.client.rpc(Transatlantic);
+              const r = await ta.lookup({ sessionID: me2.sessionID });
+              context.ui.toast.show({
+                message: r?.alias ? `alias: ${r.alias}` : "no alias. claim one: /ta_register <alias>"
+              });
+            }
+          },
+          {
+            id: "transatlantic.register",
+            title: "Transatlantic: register",
+            group: "Transatlantic",
+            palette: true,
+            slash: { name: "ta_register", arguments: true },
+            run: async (input) => {
+              const me2 = context.ui.router.current();
+              if (me2?.type !== "session") {
+                context.ui.toast.show({ message: "open a session first." });
+                return;
+              }
+              const typed = typeof input === "string" ? input.trim().toLowerCase() : "";
+              const alias = typed || (await context.ui.dialog.prompt({ title: "alias", placeholder: "backend" }))?.trim().toLowerCase();
+              if (!alias) return;
+              const ta = context.client.rpc(Transatlantic);
+              const r = await ta.claim({ alias, sessionID: me2.sessionID });
+              context.ui.toast.show({ message: r.message, variant: r.ok ? "success" : "error" });
+            }
+          },
+          {
+            id: "transatlantic.unregister",
+            title: "Transatlantic: unregister",
+            group: "Transatlantic",
+            palette: true,
+            slash: { name: "ta_unregister" },
+            run: async () => {
+              const me2 = context.ui.router.current();
+              if (me2?.type !== "session") {
+                context.ui.toast.show({ message: "open a session first." });
+                return;
+              }
+              const ta = context.client.rpc(Transatlantic);
+              const mine = await ta.lookup({ sessionID: me2.sessionID });
+              if (!mine?.alias) {
+                context.ui.toast.show({ message: "this session has no alias." });
+                return;
+              }
+              const yes = await context.ui.dialog.confirm({
+                title: `release ${mine.alias}?`,
+                message: "other sessions will no longer reach you by this name.",
+                label: { confirm: "release", cancel: "keep" }
+              });
+              if (!yes) return;
+              const r = await ta.releaseAlias({ alias: mine.alias, sessionID: me2.sessionID });
+              context.ui.toast.show({ message: r.message, variant: r.ok ? "success" : "error" });
+            }
+          }
+        ]
+      }))
+    );
     return () => disposers.forEach((d2) => {
       try {
         d2();

@@ -46,34 +46,23 @@ export default Plugin.define({
       if (typeof d === "function") disposers.push(d as () => void)
     }
 
-    // per-part isolation: one bad registration must not kill the rest.
-    // each catch logs which part failed so logs pinpoint it.
-    try {
-      keep(
-        context.ui.slot({
-          append: "sidebar.footer",
-          render: (props: any) => <AliasBadge sessionID={props?.sessionID} />,
-        }),
-      )
-    } catch (e) {
-      console.error("[transatlantic] sidebar slot failed", e)
-    }
-    try {
-      keep(
-        context.ui.slot({
-          append: "prompt.footer.status",
-          render: (props: any) => <AliasBadge sessionID={props?.sessionID} />,
-        }),
-      )
-    } catch (e) {
-      console.error("[transatlantic] status slot failed", e)
-    }
+    keep(
+      context.ui.slot({
+        append: "sidebar.footer",
+        render: (props: any) => <AliasBadge sessionID={props?.sessionID} />,
+      }),
+    )
+    keep(
+      context.ui.slot({
+        append: "prompt.footer.status",
+        render: (props: any) => <AliasBadge sessionID={props?.sessionID} />,
+      }),
+    )
 
-    try {
-      keep(
-        context.keymap.layer(() => ({
-          mode: "global",
-          commands: [
+    keep(
+      context.keymap.layer(() => ({
+        mode: "global",
+        commands: [
           {
             id: "transatlantic.peers",
             title: "Transatlantic: peers",
@@ -191,10 +180,7 @@ export default Plugin.define({
           },
         ],
       })),
-      )
-    } catch (e) {
-      console.error("[transatlantic] keymap layer failed", e)
-    }
+    )
 
     return () => disposers.forEach((d) => {
       try {
