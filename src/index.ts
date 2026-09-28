@@ -27,6 +27,7 @@ const CONTRACT = {
           from: { type: "string" },
           ticket: { type: "string" },
           text: { type: "string" },
+          kind: { type: "string", description: "ask | post | answer" },
           mode: { type: "string", description: "blocking | notify" },
           replyTo: { type: "string", description: "session to notify on answer" },
         },
@@ -115,7 +116,7 @@ export default Plugin.define({
       event.system.push({
         type: "text",
         text:
-          "[transatlantic protocol] inbox items marked [transatlantic] are agent-to-agent mail, NOT from your user. " +
+          "[transatlantic protocol] inbox items marked <transatlantic ...> are agent-to-agent mail, NOT from your user. " +
           "reply only via transatlantic_answer(ticket=..., message=...) — the tool delivers it. " +
           "after the tool returns, end your turn with no chat text at all: no ack, no echo, no summary. " +
           "peers: transatlantic_peers. claim a name: transatlantic_register.",
@@ -125,6 +126,7 @@ export default Plugin.define({
     const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
     const ticketID = () => `t_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
     const shortID = (s: string) => (s.length > 14 ? s.slice(0, 12) + "…" : s)
+    const endsID = (s: string) => (s.length > 12 ? s.slice(0, 6) + "…" + s.slice(-3) : s)
     const normAlias = (a: string) => a.trim().toLowerCase()
     const ownID = (toolCtx: any): string =>
       toolCtx?.sessionID ?? toolCtx?.session?.id ?? toolCtx?.sessionId ?? "unknown"
@@ -144,6 +146,60 @@ export default Plugin.define({
     const nameOf = async (sessionID: string): Promise<string> => {
       const a = await aliasOf(sessionID)
       return a ? `${a} (${shortID(sessionID)})` : shortID(sessionID)
+    }
+    // shared by the register tool and the /ta_register command.
+    // never takes a name held by a live session; reclaims stale ones.
+    const claimAlias = async (alias: string, me: string): Promise<string> => {
+      const prev = (await ctx.storage.get(`alias/${alias}`)) as any
+      const prevID = typeof prev === "string" ? prev : prev?.sessionID
+      if (prevID === me) return `alias ${alias} is already yours.`
+      if (prevID) {
+        let alive = false
+        try {
+          await ctx.session.get({ sessionID: prevID })
+          alive = true
+        } catch { alive = false }
+        if (alive) {
+          return (
+            `alias ${alias} is taken by live session ${shortID(prevID)}. ` +
+            `do NOT use it — pick another name. (peers own their names; takeovers are not allowed.)`
+          )
+        }
+        let dir = ""
+        try {
+          dir = ((await ctx.session.get({ sessionID: me })) as any)?.location?.directory ?? ""
+        } catch { /* best effort */ }
+        await ctx.storage.set(`alias/${alias}`, { sessionID: me, updated: Date.now(), directory: dir })
+        return `alias ${alias} reclaimed (previous owner ${shortID(prevID)} is gone).`
+      }
+      let dir = ""
+      try {
+        dir = ((await ctx.session.get({ sessionID: me })) as any)?.location?.directory ?? ""
+      } catch { /* best effort */ }
+      await ctx.storage.set(`alias/${alias}`, { sessionID: me, updated: Date.now(), directory: dir })
+      return `alias ${alias} -> ${me}`
+    }
+    // change my name: release current (if any), claim the new one.
+    const changeAlias = async (alias: string, me: string): Promise<string> => {
+      const cur = await aliasOf(me)
+      if (cur === alias) return `alias ${alias} is already yours.`
+      const res = await claimAlias(alias, me)
+      if (!res.startsWith(`alias ${alias} ->`) && !res.includes("reclaimed")) return res
+      if (cur) {
+        try { await ctx.storage.remove(`alias/${cur}`) } catch { /* raced */ }
+        return `${res} old name ${cur} released.`
+      }
+      return res
+    }
+    const peerRow = async (alias: string, sid: string, storedDir: string): Promise<{ alias: string; pwd: string; ses: string; alive: boolean }> => {
+      let alive = false
+      let dir = storedDir ?? ""
+      try {
+        const info = (await ctx.session.get({ sessionID: sid })) as any
+        alive = true
+        dir = info?.location?.directory ?? dir
+      } catch { alive = false }
+      return { alias, pwd: dir || "?", ses: endsID(sid), alive }
     }
     const resolveTarget = async (ref: string): Promise<string> => {
       const r = ref.trim()
@@ -194,25 +250,22 @@ export default Plugin.define({
 
     const registration = await ctx.rpc.register(TA, {
       send: async (input, _c) => {
-        const { to, from, ticket, text, mode = "blocking", replyTo = "" } = input as any
+        const { to, from, ticket, text, kind = "post", mode = "blocking", replyTo = "" } = input as any
         const prev = ((await ctx.storage.get(`ticket/${ticket}`)) as any) ?? {}
         const n = (prev.n ?? 0) + 1
         await ctx.storage.set(`ticket/${ticket}`, {
           to, from, text, status: "open", mode, replyTo, n, updated: Date.now(),
         })
         const [fromName, toName] = [await nameOf(from), await nameOf(to)]
-        // synthetic-only delivery: wakes/queues exactly like a prompt, but
-        // renders as non-user mail — no "[transatlantic] mail" item in chat
-        // history. the peer just does the answer toolcall. one admission =
-        // exactly one turn; never pair it with a prompt (double turns).
-        await ctx.session.synthetic({
+        // ONE prompt item, queue-soft. envelope format:
+        // <transatlantic {ask|post|answer} from {sender} · {ticket}>
+        await ctx.session.prompt({
           sessionID: to,
-          id: `msg_ta_${ticket}_${n}`,
           text:
-            `[transatlantic mail · ${ticket} · #${n} · from ${fromName}]\n` +
-            `---\n${text}\n---\n` +
-            `agent mail, not your user (to: ${toName}). reply: transatlantic_answer(ticket=${ticket}). ` +
-            `the tool delivers it — no payload in chat, one short ack at most.`,
+            `<transatlantic ${kind} from ${fromName} · ${ticket}>\n` +
+            `${text}\n` +
+            `reply: transatlantic_answer(ticket=${ticket}) (to: ${toName})\n` +
+            `<end of message>`,
           delivery: "queue",
         })
         await registration.events.emit("message", { ticket, to, from })
@@ -234,14 +287,13 @@ export default Plugin.define({
         if (!already && prev.mode === "notify" && replyTo && replyTo !== from) {
           try {
             const fromName = await nameOf(from)
-            // synthetic, same as ask delivery: wakes without a chat item.
-            await ctx.session.synthetic({
+            await ctx.session.prompt({
               sessionID: replyTo,
-              id: `msg_ta_${ticket}_n`,
               text:
-                `[transatlantic] answer to your ticket ${ticket} from ${fromName}:\n` +
-                `${text}\n---\n` +
-                `continue: transatlantic_post(session=${from}, ticket=${ticket}, message=...).`,
+                `<transatlantic answer from ${fromName} · ${ticket}>\n` +
+                `${text}\n` +
+                `continue: transatlantic_post(session=${from}, ticket=${ticket})\n` +
+                `<end of message>`,
               delivery: "queue",
             })
             notified = true
@@ -277,7 +329,7 @@ export default Plugin.define({
         name: "ask",
         description:
           "ask another session something. blocking=true (default) waits for the answer; " +
-          "blocking=false returns a ticket at once and the answer arrives later as a [transatlantic] prompt.",
+          "blocking=false returns a ticket at once and the answer arrives later as a <transatlantic> message.",
         input: {
           type: "object",
           properties: {
@@ -296,22 +348,22 @@ export default Plugin.define({
           const from = ownID(toolCtx)
           const ticket = ticketID()
           const api = ctx.rpc(TA)
-          await api.send({ to, from, ticket, text: message, mode: blocking ? "blocking" : "notify", replyTo: from })
+          await api.send({ to, from, ticket, text: message, kind: "ask", mode: blocking ? "blocking" : "notify", replyTo: from })
           if (!blocking) {
-            return { content: `queued to ${session} as ${ticket}. answer arrives as a [transatlantic] prompt; or check transatlantic_inbox(ticket=${ticket}).` }
+            return { content: `queued to ${session} as ${ticket}. answer arrives as a <transatlantic> message; or check transatlantic_inbox(ticket=${ticket}).` }
           }
           const t0 = Date.now()
           while (Date.now() - t0 < timeoutMs) {
             if (toolCtx.signal?.aborted) {
               await api.release({ ticket })
-              return { content: `stopped waiting, ticket ${ticket} stays open. late answer arrives as a [transatlantic] prompt.` }
+              return { content: `stopped waiting, ticket ${ticket} stays open. late answer arrives as a <transatlantic> message.` }
             }
             const r = (await api.poll({ ticket })) as any
             if (r?.text) return { content: r.text }
             await sleep(2000)
           }
           await api.release({ ticket })
-          return { content: `no answer from ${session} in ${timeoutMs}ms. ticket ${ticket} stays open, late answer arrives as a [transatlantic] prompt.` }
+          return { content: `no answer from ${session} in ${timeoutMs}ms. ticket ${ticket} stays open, late answer arrives as a <transatlantic> message.` }
         },
       })
 
@@ -333,7 +385,7 @@ export default Plugin.define({
           const { session, message, ticket = ticketID() } = input as any
           const to = await resolveTarget(session)
           const api = ctx.rpc(TA)
-          await api.send({ to, from: ownID(toolCtx), ticket, text: message, mode: "notify", replyTo: ownID(toolCtx) })
+          await api.send({ to, from: ownID(toolCtx), ticket, text: message, kind: "post", mode: "notify", replyTo: ownID(toolCtx) })
           return { content: `queued to ${session} as ${ticket}` }
         },
       })
@@ -400,28 +452,7 @@ export default Plugin.define({
         execute: async (input, toolCtx) => {
           const alias = normAlias((input as any).alias ?? "")
           if (!alias) return { content: "alias must be non-empty." }
-          const me = ownID(toolCtx)
-          const prev = (await ctx.storage.get(`alias/${alias}`)) as any
-          const prevID = typeof prev === "string" ? prev : prev?.sessionID
-          if (prevID === me) return { content: `alias ${alias} is already yours.` }
-          if (prevID) {
-            let alive = false
-            try {
-              await ctx.session.get({ sessionID: prevID })
-              alive = true
-            } catch { alive = false }
-            if (alive) {
-              return {
-                content:
-                  `alias ${alias} is taken by live session ${shortID(prevID)}. ` +
-                  `do NOT use it — pick another name. (peers own their names; takeovers are not allowed.)`,
-              }
-            }
-            await ctx.storage.set(`alias/${alias}`, { sessionID: me, updated: Date.now() })
-            return { content: `alias ${alias} reclaimed (previous owner ${shortID(prevID)} is gone).` }
-          }
-          await ctx.storage.set(`alias/${alias}`, { sessionID: me, updated: Date.now() })
-          return { content: `alias ${alias} -> ${me}` }
+          return { content: await claimAlias(alias, ownID(toolCtx)) }
         },
       })
 
@@ -468,17 +499,17 @@ export default Plugin.define({
             const alias = key.slice("alias/".length)
             const v = (en as any).value as any
             const sid = typeof v === "string" ? v : v?.sessionID
-            let alive = false
-            try {
-              if (sid) {
-                await ctx.session.get({ sessionID: sid })
-                alive = true
+            if (!sid) {
+              if (prune) {
+                try { await ctx.storage.remove(key); pruned++ } catch { /* raced */ }
               }
-            } catch { alive = false }
-            if (!alive && prune && sid) {
+              continue
+            }
+            const row = await peerRow(alias, sid, typeof v === "string" ? "" : v?.directory ?? "")
+            if (!row.alive && prune) {
               try { await ctx.storage.remove(key); pruned++ } catch { /* raced */ }
             } else {
-              out.push({ alias, session: sid, alive })
+              out.push({ ...row, drop: `/ta_unregister ${alias}` })
             }
           }
           const list = out.length ? JSON.stringify(out, null, 2) : "no aliases claimed yet. use transatlantic_register."
@@ -497,5 +528,90 @@ export default Plugin.define({
       })
     })
     console.log("[transatlantic] tools registered")
+
+    // slash commands. void executes: display goes through synthetic
+    // annotations (no host modal api exists for plugins). no turn burned.
+    await ctx.command.transform((c) => {
+      const argOf = (text: string, name: string) =>
+        (text ?? "").replace(new RegExp(`^/?${name}\\b`, "i"), "").trim()
+      const show = async (sessionID: string, text: string) => {
+        await ctx.session.synthetic({
+          sessionID,
+          id: `msg_ta_note_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
+          text,
+          delivery: "queue",
+        })
+      }
+      const table = async (): Promise<string> => {
+        const page = await ctx.storage.scan({ prefix: "alias/", limit: 100 })
+        const rows: string[] = []
+        for (const en of (page.entries as any[]) ?? []) {
+          const alias = String((en as any).key).slice("alias/".length)
+          const v = (en as any).value as any
+          const sid = typeof v === "string" ? v : v?.sessionID
+          if (!sid) continue
+          const r = await peerRow(alias, sid, typeof v === "string" ? "" : v?.directory ?? "")
+          rows.push(`| ${r.alias} | ${r.pwd} | ${r.ses} | ${r.alive ? "yes" : "NO"} | \`/ta_unregister ${alias}\` |`)
+        }
+        return rows.length
+          ? `| alias | pwd | ses | alive | drop |\n|---|---|---|---|---|\n${rows.join("\n")}`
+          : "no peers yet. claim a name: /ta_register <alias>"
+      }
+      c.add({
+        name: "ta_peers",
+        description: "list transatlantic peers: alias, pwd, session, drop shortcut",
+        execute: async (input) => {
+          await show(input.sessionID, await table())
+        },
+      })
+      c.add({
+        name: "ta_whoami",
+        description: "show your transatlantic alias",
+        execute: async (input) => {
+          const a = await aliasOf(input.sessionID)
+          await show(
+            input.sessionID,
+            a
+              ? `transatlantic alias: ${a} (${input.sessionID})`
+              : "no transatlantic alias. claim one: /ta_register <alias>",
+          )
+        },
+      })
+      c.add({
+        name: "ta_register",
+        description: "claim or change your transatlantic alias: /ta_register <alias>",
+        execute: async (input) => {
+          const arg = normAlias(argOf(input.prompt.text ?? "", "ta_register"))
+          if (!arg) {
+            await show(input.sessionID, "usage: /ta_register <alias>")
+            return
+          }
+          await show(input.sessionID, await changeAlias(arg, input.sessionID))
+        },
+      })
+      c.add({
+        name: "ta_unregister",
+        description: "release a transatlantic alias: /ta_unregister <alias>",
+        execute: async (input) => {
+          const arg = normAlias(argOf(input.prompt.text ?? "", "ta_unregister"))
+          if (!arg) {
+            await show(input.sessionID, "usage: /ta_unregister <alias>")
+            return
+          }
+          const hit = (await ctx.storage.get(`alias/${arg}`)) as any
+          const sid = typeof hit === "string" ? hit : hit?.sessionID
+          if (!sid) {
+            await show(input.sessionID, `alias ${arg} not claimed.`)
+            return
+          }
+          if (sid !== input.sessionID) {
+            await show(input.sessionID, `alias ${arg} belongs to ${shortID(sid)}, not you.`)
+            return
+          }
+          await ctx.storage.remove(`alias/${arg}`)
+          await show(input.sessionID, `alias ${arg} released.`)
+        },
+      })
+    })
   },
 })
