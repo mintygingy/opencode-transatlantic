@@ -72,4 +72,6 @@ transatlantic_whoami()
 - `/ta_register [alias]` — input dialog when no arg; claims or changes.
 - `/ta_unregister` — releases this session's alias after confirm.
 
-plus `ta:<alias>` badges in the sidebar footer and prompt status row.
+plus `ta:<alias>` badge in the sidebar footer. (prompt status row dropped:
+its renderer stringifies children with `instanceof Element` and there is
+no DOM `Element` in the plugin runtime.)

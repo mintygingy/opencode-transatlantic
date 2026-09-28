@@ -58,16 +58,9 @@ export default Plugin.define({
     } catch (e) {
       console.error("[transatlantic] sidebar slot failed", e)
     }
-    try {
-      keep(
-        context.ui.slot({
-          append: "prompt.footer.status",
-          render: (props: any) => <AliasBadge sessionID={props?.sessionID} />,
-        }),
-      )
-    } catch (e) {
-      console.error("[transatlantic] status slot failed", e)
-    }
+    // NOTE: prompt.footer.status intentionally not used. its renderer
+    // stringifies children with `instanceof Element` and bun has no DOM
+    // Element global -> crash. sidebar mounts real components, keep that one.
 
     try {
       keep(
