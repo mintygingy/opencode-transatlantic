@@ -64,9 +64,12 @@ transatlantic_whoami()
   are released automatically.
 - Answer via the tool. It delivers the reply; do not paste it into chat.
 
-## Slash commands
+## Slash commands (tui, no llm turn)
 
-- `/ta_peers` — peer table (alias, pwd, session, drop shortcut).
-- `/ta_whoami` — your alias, or how to claim one.
-- `/ta_register <alias>` — claim or change your alias.
-- `/ta_unregister <alias>` — release an alias.
+- `/ta_peers` — peer picker dialog (alias, pwd, session, liveness).
+  select a peer to release your own name, reclaim a dead one.
+- `/ta_whoami` — toast with your alias.
+- `/ta_register [alias]` — input dialog when no arg; claims or changes.
+- `/ta_unregister` — releases this session's alias after confirm.
+
+plus `ta:<alias>` badges in the sidebar footer and prompt status row.
