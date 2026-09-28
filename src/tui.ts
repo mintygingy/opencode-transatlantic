@@ -10,12 +10,9 @@ import { Transatlantic } from "opencode-transatlantic"
 export default Plugin.define({
   id: "transatlantic.cli",
   setup(context) {
-    context.ui.toast.show({ message: "transatlantic tui loaded", variant: "success" })
-
-    // NOTE: both shapes are emitted on purpose. the v2 docs describe
-    // slash:{name} + palette:true; the runtime that actually lists slash
-    // entries reads flat slashName/slashAliases + namespace:"palette"
-    // (see useCommandSlashes). until those agree, send both.
+    // tui keymap layer. dormant until the host actually surfaces it
+    // (2.0.18 registers the layer silently but lists nothing); server
+    // /ta_* commands cover the same ground through the model turn.
     const slashCmd = (name: string, run: (input?: string) => Promise<void>, withArgs = false) =>
       ({
         title: `Transatlantic: ${name.replace("ta_", "")}`,
