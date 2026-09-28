@@ -21,10 +21,10 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/USER/opencode-transatlantic.git"
+    "url": "https://github.com/mintygingy/opencode-transatlantic.git"
   },
-  "homepage": "https://github.com/USER/opencode-transatlantic",
-  "bugs": "https://github.com/USER/opencode-transatlantic/issues",
+  "homepage": "https://github.com/mintygingy/opencode-transatlantic",
+  "bugs": "https://github.com/mintygingy/opencode-transatlantic/issues",
   "scripts": {
     "build": "esbuild src/index.ts --bundle --platform=node --format=esm --outfile=dist-plugin/transatlantic.js"
   },
