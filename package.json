@@ -1,0 +1,41 @@
+{
+  "name": "opencode-transatlantic",
+  "version": "0.1.0",
+  "description": "soft cross-session chat for opencode v2 — queue-only, never interrupts",
+  "type": "module",
+  "license": "MIT",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "AGENTS.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "agents",
+    "multi-agent"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/USER/opencode-transatlantic.git"
+  },
+  "homepage": "https://github.com/USER/opencode-transatlantic",
+  "bugs": "https://github.com/USER/opencode-transatlantic/issues",
+  "scripts": {
+    "build": "esbuild src/index.ts --bundle --platform=node --format=esm --outfile=dist-plugin/transatlantic.js"
+  },
+  "dependencies": {
+    "@opencode/plugin": "^2.0.18"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2",
+    "typescript": "^5.6.0"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true
+  }
+}
