@@ -1,4 +1,5 @@
 node_modules/
 dist-plugin/
+dist-tui/
 .opencode/
 *.log

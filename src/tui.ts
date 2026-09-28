@@ -1,72 +1,30 @@
-import { Show, createResource } from "solid-js"
-import { Plugin, usePlugin } from "@opencode/plugin/tui"
+import { Plugin } from "@opencode/plugin/tui"
 import { Transatlantic } from "opencode-transatlantic"
 
-// tui side of transatlantic. client-side slash commands (no llm turn),
-// real input/select dialogs, sidebar + footer alias badges.
-// all state lives server-side; everything here goes through our rpc.
-
-function currentSessionID(): string | undefined {
-  try {
-    const context = usePlugin()
-    const r = context.ui.router.current() as any
-    return r?.type === "session" && typeof r.sessionID === "string" ? r.sessionID : undefined
-  } catch {
-    return undefined
-  }
-}
-
-function rpc() {
-  return usePlugin().client.rpc(Transatlantic)
-}
-
-function AliasBadge(props: { sessionID?: string }) {
-  const sid = () => props.sessionID ?? currentSessionID()
-  const [alias] = createResource(sid, async (id) => {
-    if (!id) return null
-    try {
-      const r = (await rpc().lookup({ sessionID: id })) as any
-      return typeof r?.alias === "string" ? r.alias : null
-    } catch {
-      return null
-    }
-  })
-  return (
-    <Show when={alias()}>
-      <text>ta:{alias()}</text>
-    </Show>
-  )
-}
+// tui side of transatlantic. intentionally JSX-free: the host's tsx pipeline
+// in 2.0.18 is unreliable for third-party components (react/jsxDEV resolution,
+// DOM Element assumptions in slot renderers). client-side slash commands,
+// real input/select dialogs and toasts need no JSX at all.
+// sidebar badges deferred until the host tsx story solidifies.
 
 export default Plugin.define({
   id: "transatlantic.cli",
   setup(context) {
-    const disposers: Array<() => void> = []
-    const keep = (d: unknown) => {
-      if (typeof d === "function") disposers.push(d as () => void)
+    context.ui.toast.show({ message: "transatlantic tui loaded", variant: "success" })
+
+    const currentSession = (): string | undefined => {
+      try {
+        const r = context.ui.router.current() as any
+        return r?.type === "session" && typeof r.sessionID === "string" ? r.sessionID : undefined
+      } catch {
+        return undefined
+      }
     }
 
-    // per-part isolation: one bad registration must not kill the rest.
-    // each catch logs which part failed so logs pinpoint it.
     try {
-      keep(
-        context.ui.slot({
-          append: "sidebar.footer",
-          render: (props: any) => <AliasBadge sessionID={props?.sessionID} />,
-        }),
-      )
-    } catch (e) {
-      console.error("[transatlantic] sidebar slot failed", e)
-    }
-    // NOTE: prompt.footer.status intentionally not used. its renderer
-    // stringifies children with `instanceof Element` and bun has no DOM
-    // Element global -> crash. sidebar mounts real components, keep that one.
-
-    try {
-      keep(
-        context.keymap.layer(() => ({
-          mode: "global",
-          commands: [
+      context.keymap.layer(() => ({
+        mode: "global",
+        commands: [
           {
             id: "transatlantic.peers",
             title: "Transatlantic: peers",
@@ -91,8 +49,7 @@ export default Plugin.define({
               if (!picked) return
               const peer = peers.find((p: any) => p.alias === picked)
               if (!peer) return
-              const me = context.ui.router.current() as any
-              const mySession = me?.type === "session" ? me.sessionID : undefined
+              const mySession = currentSession()
               if (!peer.alive) {
                 context.ui.toast.show({
                   message: `owner of ${peer.alias} is gone. claim it: /ta_register ${peer.alias}`,
@@ -120,13 +77,13 @@ export default Plugin.define({
             palette: true,
             slash: { name: "ta_whoami" },
             run: async () => {
-              const me = context.ui.router.current() as any
-              if (me?.type !== "session") {
+              const me = currentSession()
+              if (!me) {
                 context.ui.toast.show({ message: "open a session first." })
                 return
               }
               const ta = context.client.rpc(Transatlantic)
-              const r = (await ta.lookup({ sessionID: me.sessionID })) as any
+              const r = (await ta.lookup({ sessionID: me })) as any
               context.ui.toast.show({
                 message: r?.alias ? `alias: ${r.alias}` : "no alias. claim one: /ta_register <alias>",
               })
@@ -139,8 +96,8 @@ export default Plugin.define({
             palette: true,
             slash: { name: "ta_register", arguments: true },
             run: async (input) => {
-              const me = context.ui.router.current() as any
-              if (me?.type !== "session") {
+              const me = currentSession()
+              if (!me) {
                 context.ui.toast.show({ message: "open a session first." })
                 return
               }
@@ -150,7 +107,7 @@ export default Plugin.define({
                 (await context.ui.dialog.prompt({ title: "alias", placeholder: "backend" }))?.trim().toLowerCase()
               if (!alias) return
               const ta = context.client.rpc(Transatlantic)
-              const r = (await ta.claim({ alias, sessionID: me.sessionID })) as any
+              const r = (await ta.claim({ alias, sessionID: me })) as any
               context.ui.toast.show({ message: r.message, variant: r.ok ? "success" : "error" })
             },
           },
@@ -161,13 +118,13 @@ export default Plugin.define({
             palette: true,
             slash: { name: "ta_unregister" },
             run: async () => {
-              const me = context.ui.router.current() as any
-              if (me?.type !== "session") {
+              const me = currentSession()
+              if (!me) {
                 context.ui.toast.show({ message: "open a session first." })
                 return
               }
               const ta = context.client.rpc(Transatlantic)
-              const mine = (await ta.lookup({ sessionID: me.sessionID })) as any
+              const mine = (await ta.lookup({ sessionID: me })) as any
               if (!mine?.alias) {
                 context.ui.toast.show({ message: "this session has no alias." })
                 return
@@ -178,21 +135,14 @@ export default Plugin.define({
                 label: { confirm: "release", cancel: "keep" },
               })
               if (!yes) return
-              const r = (await ta.releaseAlias({ alias: mine.alias, sessionID: me.sessionID })) as any
+              const r = (await ta.releaseAlias({ alias: mine.alias, sessionID: me })) as any
               context.ui.toast.show({ message: r.message, variant: r.ok ? "success" : "error" })
             },
           },
         ],
-      })),
-      )
+      }))
     } catch (e) {
       console.error("[transatlantic] keymap layer failed", e)
     }
-
-    return () => disposers.forEach((d) => {
-      try {
-        d()
-      } catch { /* unload race */ }
-    })
   },
 })
