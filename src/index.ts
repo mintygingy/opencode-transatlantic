@@ -234,8 +234,10 @@ export default Plugin.define({
         if (!already && prev.mode === "notify" && replyTo && replyTo !== from) {
           try {
             const fromName = await nameOf(from)
-            await ctx.session.prompt({
+            // synthetic, same as ask delivery: wakes without a chat item.
+            await ctx.session.synthetic({
               sessionID: replyTo,
+              id: `msg_ta_${ticket}_n`,
               text:
                 `[transatlantic] answer to your ticket ${ticket} from ${fromName}:\n` +
                 `${text}\n---\n` +
