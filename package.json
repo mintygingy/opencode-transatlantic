@@ -1,15 +1,16 @@
 {
   "name": "opencode-transatlantic",
-  "version": "0.2.4",
+  "version": "0.2.3",
   "description": "soft cross-session chat for opencode v2 — queue-only, never interrupts",
   "type": "module",
   "license": "MIT",
   "exports": {
     ".": "./src/index.ts",
-    "./tui": "./src/tui.ts"
+    "./tui": "./dist-tui/transatlantic.js"
   },
   "files": [
     "src",
+    "dist-tui",
     "README.md",
     "AGENTS.md",
     "LICENSE"
@@ -26,8 +27,14 @@
   },
   "homepage": "https://github.com/mintygingy/opencode-transatlantic",
   "bugs": "https://github.com/mintygingy/opencode-transatlantic/issues",
+  "peerDependencies": {
+    "@opentui/core": ">=0.5.8",
+    "@opentui/solid": ">=0.5.8",
+    "solid-js": ">=1.9.0"
+  },
   "scripts": {
-    "build": "esbuild src/index.ts --bundle --platform=node --format=esm --outfile=dist-plugin/transatlantic.js"
+    "build": "esbuild src/index.ts --bundle --platform=node --format=esm --outfile=dist-plugin/transatlantic.js",
+    "build:tui": "esbuild src/tui.tsx --bundle --platform=node --format=esm --jsx=automatic --jsx-import-source=solid-js/h --jsx-dev=false --external:@opencode/plugin/tui --external:opencode-transatlantic --outfile=dist-tui/transatlantic.js"
   },
   "dependencies": {
     "@opencode/plugin": "^2.0.18"
