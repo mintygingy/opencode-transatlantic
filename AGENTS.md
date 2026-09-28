@@ -52,8 +52,7 @@ reply: transatlantic_answer(ticket=t_xxx)
 Registered by the `./tui` entry: `/ta_peers` (picker dialog with
 pwd/session/liveness, confirm to release), `/ta_whoami` (toast),
 `/ta_register [alias]` (input dialog when empty), `/ta_unregister`
-(confirms, releases own name). Alias badge in the sidebar footer
-(prompt status row unsupported: its renderer needs DOM `Element`).
+(confirms, releases own name). Alias badge in sidebar footer + prompt status.
 
 ## Protocol (follow strictly)
 

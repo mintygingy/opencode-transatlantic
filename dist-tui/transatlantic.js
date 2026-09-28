@@ -998,6 +998,16 @@ var tui_default = Plugin.define({
     }
     try {
       keep(
+        context.ui.slot({
+          append: "prompt.footer.status",
+          render: (props) => /* @__PURE__ */ jsx(AliasBadge, { sessionID: props?.sessionID })
+        })
+      );
+    } catch (e) {
+      console.error("[transatlantic] status slot failed", e);
+    }
+    try {
+      keep(
         context.keymap.layer(() => ({
           mode: "global",
           commands: [
