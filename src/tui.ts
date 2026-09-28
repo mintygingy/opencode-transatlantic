@@ -12,6 +12,23 @@ export default Plugin.define({
   setup(context) {
     context.ui.toast.show({ message: "transatlantic tui loaded", variant: "success" })
 
+    // NOTE: both shapes are emitted on purpose. the v2 docs describe
+    // slash:{name} + palette:true; the runtime that actually lists slash
+    // entries reads flat slashName/slashAliases + namespace:"palette"
+    // (see useCommandSlashes). until those agree, send both.
+    const slashCmd = (name: string, run: (input?: string) => Promise<void>, withArgs = false) =>
+      ({
+        title: `Transatlantic: ${name.replace("ta_", "")}`,
+        group: "Transatlantic",
+        palette: true,
+        suggested: true,
+        slash: withArgs ? { name, arguments: true as const } : { name },
+        slashName: name,
+        slashAliases: [],
+        namespace: "palette",
+        run,
+      }) as any
+
     const currentSession = (): string | undefined => {
       try {
         const r = context.ui.router.current() as any
@@ -25,13 +42,7 @@ export default Plugin.define({
       context.keymap.layer(() => ({
         mode: "global",
         commands: [
-          {
-            id: "transatlantic.peers",
-            title: "Transatlantic: peers",
-            group: "Transatlantic",
-            palette: true,
-            slash: { name: "ta_peers" },
-            run: async () => {
+          slashCmd("ta_peers", async () => {
               const ta = context.client.rpc(Transatlantic)
               const { peers } = (await ta.peers({})) as any
               if (!peers?.length) {
@@ -68,15 +79,8 @@ export default Plugin.define({
               if (!yes) return
               const r = (await ta.releaseAlias({ alias: peer.alias, sessionID: mySession })) as any
               context.ui.toast.show({ message: r.message, variant: r.ok ? "success" : "error" })
-            },
-          },
-          {
-            id: "transatlantic.whoami",
-            title: "Transatlantic: whoami",
-            group: "Transatlantic",
-            palette: true,
-            slash: { name: "ta_whoami" },
-            run: async () => {
+            }),
+          slashCmd("ta_whoami", async () => {
               const me = currentSession()
               if (!me) {
                 context.ui.toast.show({ message: "open a session first." })
@@ -87,15 +91,10 @@ export default Plugin.define({
               context.ui.toast.show({
                 message: r?.alias ? `alias: ${r.alias}` : "no alias. claim one: /ta_register <alias>",
               })
-            },
-          },
-          {
-            id: "transatlantic.register",
-            title: "Transatlantic: register",
-            group: "Transatlantic",
-            palette: true,
-            slash: { name: "ta_register", arguments: true },
-            run: async (input) => {
+            }),
+          slashCmd(
+            "ta_register",
+            async (input) => {
               const me = currentSession()
               if (!me) {
                 context.ui.toast.show({ message: "open a session first." })
@@ -110,14 +109,9 @@ export default Plugin.define({
               const r = (await ta.claim({ alias, sessionID: me })) as any
               context.ui.toast.show({ message: r.message, variant: r.ok ? "success" : "error" })
             },
-          },
-          {
-            id: "transatlantic.unregister",
-            title: "Transatlantic: unregister",
-            group: "Transatlantic",
-            palette: true,
-            slash: { name: "ta_unregister" },
-            run: async () => {
+            true,
+          ),
+          slashCmd("ta_unregister", async () => {
               const me = currentSession()
               if (!me) {
                 context.ui.toast.show({ message: "open a session first." })
@@ -137,8 +131,7 @@ export default Plugin.define({
               if (!yes) return
               const r = (await ta.releaseAlias({ alias: mine.alias, sessionID: me })) as any
               context.ui.toast.show({ message: r.message, variant: r.ok ? "success" : "error" })
-            },
-          },
+            }),
         ],
       }))
     } catch (e) {

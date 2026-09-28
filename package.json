@@ -1,6 +1,6 @@
 {
   "name": "opencode-transatlantic",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "description": "soft cross-session chat for opencode v2 — queue-only, never interrupts",
   "type": "module",
   "license": "MIT",
