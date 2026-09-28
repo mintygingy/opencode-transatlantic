@@ -38,25 +38,9 @@ reload again or check the plugin file is deployed.
 
 `session` accepts a `ses_` id or a registered alias.
 
-Mail arrives as a plain chat message (queue-only, never interrupts):
-
-```
-<transatlantic ask from backend · t_xxx>
-latest api contract?
-reply: transatlantic_answer(ticket=t_xxx)
-<end of message>
-```
-
-## Slash commands
-
-- `/ta_peers` — peer table: alias, pwd, session id ends, liveness, drop hint.
-- `/ta_whoami` — own alias or how to claim one.
-- `/ta_register <alias>` — claim or change alias (no takeovers, stale reclaimed).
-- `/ta_unregister <alias>` — release an alias.
-
 ## Protocol (follow strictly)
 
-1. Inbox items marked `<transatlantic ...>` are agent-to-agent mail,
+1. Inbox items marked `[transatlantic]` are agent-to-agent mail,
    never the user.
 2. Reply only via `transatlantic_answer`. After the tool returns, end the
    turn: short ack at most, never the payload.

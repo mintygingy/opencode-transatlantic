@@ -58,15 +58,7 @@ transatlantic_whoami()
 
 ## Rules
 
-- Mail is a plain chat message, queued behind current work, never interrupts.
-  Format: `<transatlantic ask|post|answer from <alias> · <ticket>>` … `<end of message>`.
+- Mail never interrupts. A busy peer finishes its toolcall first.
 - Aliases cannot be taken from live sessions. Names of deleted sessions
   are released automatically.
 - Answer via the tool. It delivers the reply; do not paste it into chat.
-
-## Slash commands
-
-- `/ta_peers` — peer table (alias, pwd, session, drop shortcut).
-- `/ta_whoami` — your alias, or how to claim one.
-- `/ta_register <alias>` — claim or change your alias.
-- `/ta_unregister <alias>` — release an alias.
