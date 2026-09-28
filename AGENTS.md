@@ -47,12 +47,12 @@ reply: transatlantic_answer(ticket=t_xxx)
 <end of message>
 ```
 
-## Slash commands (tui client-side, no model turn)
+## Slash commands
 
-Registered by the `./tui` entry: `/ta_peers` (picker dialog with
-pwd/session/liveness, confirm to release), `/ta_whoami` (toast),
-`/ta_register [alias]` (input dialog when empty), `/ta_unregister`
-(confirms, releases own name). Alias badge in sidebar footer + prompt status.
+- `/ta_peers` — peer table: alias, pwd, session id ends, liveness, drop hint.
+- `/ta_whoami` — own alias or how to claim one.
+- `/ta_register <alias>` — claim or change alias (no takeovers, stale reclaimed).
+- `/ta_unregister <alias>` — release an alias.
 
 ## Protocol (follow strictly)
 

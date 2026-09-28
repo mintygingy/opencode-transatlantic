@@ -87,79 +87,6 @@ const CONTRACT = {
         additionalProperties: false,
       },
     },
-    peers: {
-      input: { type: "object", properties: {}, additionalProperties: false },
-      output: {
-        type: "object",
-        properties: {
-          peers: {
-            type: "array",
-            items: {
-              type: "object",
-              properties: {
-                alias: { type: "string" },
-                session: { type: "string" },
-                ses: { type: "string" },
-                pwd: { type: "string" },
-                alive: { type: "boolean" },
-              },
-              required: ["alias", "session", "ses", "pwd", "alive"],
-              additionalProperties: false,
-            },
-          },
-        },
-        required: ["peers"],
-        additionalProperties: false,
-      },
-    },
-    lookup: {
-      input: {
-        type: "object",
-        properties: { sessionID: { type: "string" } },
-        required: ["sessionID"],
-        additionalProperties: false,
-      },
-      output: {
-        type: "object",
-        properties: { alias: { type: "string" } },
-        required: [],
-        additionalProperties: false,
-      },
-    },
-    claim: {
-      input: {
-        type: "object",
-        properties: {
-          alias: { type: "string" },
-          sessionID: { type: "string" },
-        },
-        required: ["alias", "sessionID"],
-        additionalProperties: false,
-      },
-      output: {
-        type: "object",
-        properties: { ok: { type: "boolean" }, message: { type: "string" } },
-        required: ["ok", "message"],
-        additionalProperties: false,
-      },
-    },
-    releaseAlias: {
-      input: {
-        type: "object",
-        properties: {
-          alias: { type: "string" },
-          sessionID: { type: "string" },
-        },
-        required: ["alias", "sessionID"],
-        additionalProperties: false,
-      },
-      output: {
-        type: "object",
-        properties: { ok: { type: "boolean" }, message: { type: "string" } },
-        required: ["ok", "message"],
-        additionalProperties: false,
-      },
-    },
   },
   events: {
     message: {
@@ -220,14 +147,12 @@ export default Plugin.define({
       const a = await aliasOf(sessionID)
       return a ? `${a} (${shortID(sessionID)})` : shortID(sessionID)
     }
-    // shared by the register tool and the claim rpc (tui reads through rpc).
+    // shared by the register tool and the /ta_register command.
     // never takes a name held by a live session; reclaims stale ones.
-    const claimAlias = async (alias: string, me: string): Promise<{ ok: boolean; message: string }> => {
-      if (!alias) return { ok: false, message: "alias must be non-empty." }
-      if (!me || me === "unknown") return { ok: false, message: "unknown session; cannot claim." }
+    const claimAlias = async (alias: string, me: string): Promise<string> => {
       const prev = (await ctx.storage.get(`alias/${alias}`)) as any
       const prevID = typeof prev === "string" ? prev : prev?.sessionID
-      if (prevID === me) return { ok: true, message: `alias ${alias} is already yours.` }
+      if (prevID === me) return `alias ${alias} is already yours.`
       if (prevID) {
         let alive = false
         try {
@@ -235,36 +160,34 @@ export default Plugin.define({
           alive = true
         } catch { alive = false }
         if (alive) {
-          return {
-            ok: false,
-            message:
-              `alias ${alias} is taken by live session ${shortID(prevID)}. ` +
-              `do NOT use it — pick another name. (peers own their names; takeovers are not allowed.)`,
-          }
+          return (
+            `alias ${alias} is taken by live session ${shortID(prevID)}. ` +
+            `do NOT use it — pick another name. (peers own their names; takeovers are not allowed.)`
+          )
         }
         let dir = ""
         try {
           dir = ((await ctx.session.get({ sessionID: me })) as any)?.location?.directory ?? ""
         } catch { /* best effort */ }
         await ctx.storage.set(`alias/${alias}`, { sessionID: me, updated: Date.now(), directory: dir })
-        return { ok: true, message: `alias ${alias} reclaimed (previous owner ${shortID(prevID)} is gone).` }
+        return `alias ${alias} reclaimed (previous owner ${shortID(prevID)} is gone).`
       }
       let dir = ""
       try {
         dir = ((await ctx.session.get({ sessionID: me })) as any)?.location?.directory ?? ""
       } catch { /* best effort */ }
       await ctx.storage.set(`alias/${alias}`, { sessionID: me, updated: Date.now(), directory: dir })
-      return { ok: true, message: `alias ${alias} -> ${me}` }
+      return `alias ${alias} -> ${me}`
     }
     // change my name: release current (if any), claim the new one.
-    const changeAlias = async (alias: string, me: string): Promise<{ ok: boolean; message: string }> => {
+    const changeAlias = async (alias: string, me: string): Promise<string> => {
       const cur = await aliasOf(me)
-      if (cur === alias) return { ok: true, message: `alias ${alias} is already yours.` }
+      if (cur === alias) return `alias ${alias} is already yours.`
       const res = await claimAlias(alias, me)
-      if (!res.ok) return res
+      if (!res.startsWith(`alias ${alias} ->`) && !res.includes("reclaimed")) return res
       if (cur) {
         try { await ctx.storage.remove(`alias/${cur}`) } catch { /* raced */ }
-        return { ok: true, message: `${res.message} old name ${cur} released.` }
+        return `${res} old name ${cur} released.`
       }
       return res
     }
@@ -277,40 +200,6 @@ export default Plugin.define({
         dir = info?.location?.directory ?? dir
       } catch { alive = false }
       return { alias, pwd: dir || "?", ses: endsID(sid), alive }
-    }
-    // shared by the peers tool and the peers rpc (tui reads through rpc).
-    const listPeers = async (prune: boolean): Promise<{ list: any[]; pruned: number }> => {
-      const page = await ctx.storage.scan({ prefix: "alias/", limit: 100 })
-      const out: any[] = []
-      let pruned = 0
-      for (const en of (page.entries as any[]) ?? []) {
-        const key = String((en as any).key)
-        const alias = key.slice("alias/".length)
-        const v = (en as any).value as any
-        const sid = typeof v === "string" ? v : v?.sessionID
-        if (!sid) {
-          if (prune) {
-            try { await ctx.storage.remove(key); pruned++ } catch { /* raced */ }
-          }
-          continue
-        }
-        const row = await peerRow(alias, sid, typeof v === "string" ? "" : v?.directory ?? "")
-        if (!row.alive && prune) {
-          try { await ctx.storage.remove(key); pruned++ } catch { /* raced */ }
-        } else {
-          out.push({ alias, session: sid, ses: row.ses, pwd: row.pwd, alive: row.alive })
-        }
-      }
-      return { list: out, pruned }
-    }
-    // shared by the unregister tool and the releaseAlias rpc.
-    const releaseAlias = async (alias: string, me: string): Promise<{ ok: boolean; message: string }> => {
-      const hit = (await ctx.storage.get(`alias/${alias}`)) as any
-      const sid = typeof hit === "string" ? hit : hit?.sessionID
-      if (!sid) return { ok: true, message: `alias ${alias} not claimed.` }
-      if (sid !== me) return { ok: false, message: `alias ${alias} belongs to ${shortID(sid)}, not you.` }
-      await ctx.storage.remove(`alias/${alias}`)
-      return { ok: true, message: `alias ${alias} released.` }
     }
     const resolveTarget = async (ref: string): Promise<string> => {
       const r = ref.trim()
@@ -430,22 +319,6 @@ export default Plugin.define({
           await ctx.storage.set(`ticket/${ticket}`, { ...prev, mode: "notify", updated: Date.now() })
         }
         return { ok: true }
-      },
-      peers: async (_input, _c) => {
-        const { list } = await listPeers(false)
-        return { peers: list }
-      },
-      lookup: async (input, _c) => {
-        const a = await aliasOf((input as any).sessionID)
-        return a ? { alias: a } : {}
-      },
-      claim: async (input, _c) => {
-        const { alias, sessionID } = input as any
-        return await claimAlias(normAlias(alias ?? ""), sessionID)
-      },
-      releaseAlias: async (input, _c) => {
-        const { alias, sessionID } = input as any
-        return await releaseAlias(normAlias(alias ?? ""), sessionID)
       },
     })
 
@@ -578,7 +451,8 @@ export default Plugin.define({
         options: { namespace: "transatlantic" },
         execute: async (input, toolCtx) => {
           const alias = normAlias((input as any).alias ?? "")
-          return { content: (await changeAlias(alias, ownID(toolCtx))).message }
+          if (!alias) return { content: "alias must be non-empty." }
+          return { content: await claimAlias(alias, ownID(toolCtx)) }
         },
       })
 
@@ -594,7 +468,12 @@ export default Plugin.define({
         options: { namespace: "transatlantic" },
         execute: async (input, toolCtx) => {
           const alias = normAlias((input as any).alias ?? "")
-          return { content: (await releaseAlias(alias, ownID(toolCtx))).message }
+          const hit = (await ctx.storage.get(`alias/${alias}`)) as any
+          const sid = typeof hit === "string" ? hit : hit?.sessionID
+          if (!sid) return { content: `alias ${alias} not claimed.` }
+          if (sid !== ownID(toolCtx)) return { content: `alias ${alias} belongs to ${shortID(sid)}, not you.` }
+          await ctx.storage.remove(`alias/${alias}`)
+          return { content: `alias ${alias} released.` }
         },
       })
 
@@ -612,10 +491,29 @@ export default Plugin.define({
         options: { namespace: "transatlantic" },
         execute: async (input) => {
           const { prune = false } = (input as any) ?? {}
-          const { list, pruned } = await listPeers(prune)
-          const rows = list.map((r: any) => ({ ...r, drop: `/ta_unregister ${r.alias}` }))
-          const text = rows.length ? JSON.stringify(rows, null, 2) : "no aliases claimed yet. use transatlantic_register."
-          return { content: prune ? `${text}\npruned: ${pruned}` : text }
+          const page = await ctx.storage.scan({ prefix: "alias/", limit: 100 })
+          const out: any[] = []
+          let pruned = 0
+          for (const en of (page.entries as any[]) ?? []) {
+            const key = String((en as any).key)
+            const alias = key.slice("alias/".length)
+            const v = (en as any).value as any
+            const sid = typeof v === "string" ? v : v?.sessionID
+            if (!sid) {
+              if (prune) {
+                try { await ctx.storage.remove(key); pruned++ } catch { /* raced */ }
+              }
+              continue
+            }
+            const row = await peerRow(alias, sid, typeof v === "string" ? "" : v?.directory ?? "")
+            if (!row.alive && prune) {
+              try { await ctx.storage.remove(key); pruned++ } catch { /* raced */ }
+            } else {
+              out.push({ ...row, drop: `/ta_unregister ${alias}` })
+            }
+          }
+          const list = out.length ? JSON.stringify(out, null, 2) : "no aliases claimed yet. use transatlantic_register."
+          return { content: prune ? `${list}\npruned: ${pruned}` : list }
         },
       })
 
@@ -630,5 +528,90 @@ export default Plugin.define({
       })
     })
     console.log("[transatlantic] tools registered")
+
+    // slash commands. void executes: display goes through synthetic
+    // annotations (no host modal api exists for plugins). no turn burned.
+    await ctx.command.transform((c) => {
+      const argOf = (text: string, name: string) =>
+        (text ?? "").replace(new RegExp(`^/?${name}\\b`, "i"), "").trim()
+      const show = async (sessionID: string, text: string) => {
+        await ctx.session.synthetic({
+          sessionID,
+          id: `msg_ta_note_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
+          text,
+          delivery: "queue",
+        })
+      }
+      const table = async (): Promise<string> => {
+        const page = await ctx.storage.scan({ prefix: "alias/", limit: 100 })
+        const rows: string[] = []
+        for (const en of (page.entries as any[]) ?? []) {
+          const alias = String((en as any).key).slice("alias/".length)
+          const v = (en as any).value as any
+          const sid = typeof v === "string" ? v : v?.sessionID
+          if (!sid) continue
+          const r = await peerRow(alias, sid, typeof v === "string" ? "" : v?.directory ?? "")
+          rows.push(`| ${r.alias} | ${r.pwd} | ${r.ses} | ${r.alive ? "yes" : "NO"} | \`/ta_unregister ${alias}\` |`)
+        }
+        return rows.length
+          ? `| alias | pwd | ses | alive | drop |\n|---|---|---|---|---|\n${rows.join("\n")}`
+          : "no peers yet. claim a name: /ta_register <alias>"
+      }
+      c.add({
+        name: "ta_peers",
+        description: "list transatlantic peers: alias, pwd, session, drop shortcut",
+        execute: async (input) => {
+          await show(input.sessionID, await table())
+        },
+      })
+      c.add({
+        name: "ta_whoami",
+        description: "show your transatlantic alias",
+        execute: async (input) => {
+          const a = await aliasOf(input.sessionID)
+          await show(
+            input.sessionID,
+            a
+              ? `transatlantic alias: ${a} (${input.sessionID})`
+              : "no transatlantic alias. claim one: /ta_register <alias>",
+          )
+        },
+      })
+      c.add({
+        name: "ta_register",
+        description: "claim or change your transatlantic alias: /ta_register <alias>",
+        execute: async (input) => {
+          const arg = normAlias(argOf(input.prompt.text ?? "", "ta_register"))
+          if (!arg) {
+            await show(input.sessionID, "usage: /ta_register <alias>")
+            return
+          }
+          await show(input.sessionID, await changeAlias(arg, input.sessionID))
+        },
+      })
+      c.add({
+        name: "ta_unregister",
+        description: "release a transatlantic alias: /ta_unregister <alias>",
+        execute: async (input) => {
+          const arg = normAlias(argOf(input.prompt.text ?? "", "ta_unregister"))
+          if (!arg) {
+            await show(input.sessionID, "usage: /ta_unregister <alias>")
+            return
+          }
+          const hit = (await ctx.storage.get(`alias/${arg}`)) as any
+          const sid = typeof hit === "string" ? hit : hit?.sessionID
+          if (!sid) {
+            await show(input.sessionID, `alias ${arg} not claimed.`)
+            return
+          }
+          if (sid !== input.sessionID) {
+            await show(input.sessionID, `alias ${arg} belongs to ${shortID(sid)}, not you.`)
+            return
+          }
+          await ctx.storage.remove(`alias/${arg}`)
+          await show(input.sessionID, `alias ${arg} released.`)
+        },
+      })
+    })
   },
 })
