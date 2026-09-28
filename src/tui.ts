@@ -137,13 +137,5 @@ export default Plugin.define({
     } catch (e) {
       console.error("[transatlantic] keymap layer failed", e)
     }
-
-    // diagnostic: is the layer alive? commands() lists reachable commands.
-    try {
-      const cmds = (context.keymap.commands() as any[]).map((c: any) => c?.id ?? c?.name ?? "?")
-      console.error("[transatlantic] reachable: " + JSON.stringify(cmds.filter((x) => /transatlantic|^ta_/i.test(String(x)))))
-    } catch (e) {
-      console.error("[transatlantic] commands() read failed", e)
-    }
   },
 })
