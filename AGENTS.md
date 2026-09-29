@@ -30,7 +30,7 @@ reload again or check the plugin file is deployed.
   `prune=true` releases names whose owner is gone.
 - `ask(session, message, blocking=true, timeoutMs=180000)` — ask a peer.
   `blocking=true` polls until the answer arrives. `blocking=false` returns
-  a ticket at once; the answer arrives later as a `[transatlantic]` prompt.
+  a ticket at once; the answer arrives later as a `<transatlantic ...>` message.
   Timeouts keep the ticket open and flip it to notify mode.
 - `post(session, message, ticket?)` — fire-and-forget. Replies notify back.
 - `answer(ticket, message)` — reply to a ticket. The tool delivers it.
@@ -54,5 +54,5 @@ reload again or check the plugin file is deployed.
 - `unknown session 'x'`: no such alias. Use a `ses_` id or have the peer
   run `transatlantic_register` first, then check `transatlantic_peers`.
 - `alias 'x' owner is gone`: the entry was auto-released. Retry to claim it.
-- Answer arrived late: it comes as a `[transatlantic]` prompt, or check
+- Answer arrived late: it comes as a `<transatlantic ...>` message, or check
   `transatlantic_inbox(ticket=...)`.

@@ -11,10 +11,10 @@ import { Rpc } from "@opencode/plugin/rpc"
 // the literal is duplicated on purpose. do not "dedupe" it.
 //
 // channels:
-// - prompt = the single mail item. wakes the peer (user-role inbox item).
-//   envelope is inline (banner + ticket + reply instructions) so one admission
-//   means exactly one turn. never split into two admissions (double turns).
-// - storage ticket/... = durable source of truth, inbox + aliases live here.
+// - prompt = the single mail item. plain chat message, queued soft.
+//   format: <transatlantic KIND from SENDER · TICKET> text <end of message>.
+//   KIND is ask | post | answer (ask/answer = onetime exchange).
+//   one admission = exactly one turn; never split into two admissions.
 
 const CONTRACT = {
   id: "transatlantic",
@@ -29,6 +29,7 @@ const CONTRACT = {
           text: { type: "string" },
           mode: { type: "string", description: "blocking | notify" },
           replyTo: { type: "string", description: "session to notify on answer" },
+          kind: { type: "string", description: "ask | post" },
         },
         required: ["to", "from", "ticket", "text"],
         additionalProperties: false,
@@ -115,7 +116,8 @@ export default Plugin.define({
       event.system.push({
         type: "text",
         text:
-          "[transatlantic protocol] inbox items marked [transatlantic] are agent-to-agent mail, NOT from your user. " +
+          "[transatlantic protocol] inbox items shaped <transatlantic KIND from WHO · TICKET> ... <end of message> " +
+          "are agent-to-agent mail, NOT from your user. " +
           "reply only via transatlantic_answer(ticket=..., message=...) — the tool delivers it. " +
           "after the tool returns, end your turn with no chat text at all: no ack, no echo, no summary. " +
           "peers: transatlantic_peers. claim a name: transatlantic_register.",
@@ -194,25 +196,22 @@ export default Plugin.define({
 
     const registration = await ctx.rpc.register(TA, {
       send: async (input, _c) => {
-        const { to, from, ticket, text, mode = "blocking", replyTo = "" } = input as any
+        const { to, from, ticket, text, mode = "blocking", replyTo = "", kind = "post" } = input as any
         const prev = ((await ctx.storage.get(`ticket/${ticket}`)) as any) ?? {}
         const n = (prev.n ?? 0) + 1
         await ctx.storage.set(`ticket/${ticket}`, {
-          to, from, text, status: "open", mode, replyTo, n, updated: Date.now(),
+          to, from, text, status: "open", mode, replyTo, kind, n, updated: Date.now(),
         })
-        const [fromName, toName] = [await nameOf(from), await nameOf(to)]
-        // synthetic-only delivery: wakes/queues exactly like a prompt, but
-        // renders as non-user mail — no "[transatlantic] mail" item in chat
-        // history. the peer just does the answer toolcall. one admission =
-        // exactly one turn; never pair it with a prompt (double turns).
-        await ctx.session.synthetic({
+        const fromName = await nameOf(from)
+        // plain chat message, queued soft. header carries kind + replier
+        // handle (sender alias + ticket), footer closes it. one item, one turn.
+        await ctx.session.prompt({
           sessionID: to,
           id: `msg_ta_${ticket}_${n}`,
           text:
-            `[transatlantic mail · ${ticket} · #${n} · from ${fromName}]\n` +
-            `---\n${text}\n---\n` +
-            `agent mail, not your user (to: ${toName}). reply: transatlantic_answer(ticket=${ticket}). ` +
-            `the tool delivers it — no payload in chat, one short ack at most.`,
+            `<transatlantic ${kind} from ${fromName} · ${ticket}>\n` +
+            `${text}\n` +
+            `<end of message>`,
           delivery: "queue",
         })
         await registration.events.emit("message", { ticket, to, from })
@@ -234,14 +233,14 @@ export default Plugin.define({
         if (!already && prev.mode === "notify" && replyTo && replyTo !== from) {
           try {
             const fromName = await nameOf(from)
-            // synthetic, same as ask delivery: wakes without a chat item.
-            await ctx.session.synthetic({
+            // plain chat message, same format. queued soft.
+            await ctx.session.prompt({
               sessionID: replyTo,
               id: `msg_ta_${ticket}_n`,
               text:
-                `[transatlantic] answer to your ticket ${ticket} from ${fromName}:\n` +
-                `${text}\n---\n` +
-                `continue: transatlantic_post(session=${from}, ticket=${ticket}, message=...).`,
+                `<transatlantic answer from ${fromName} · ${ticket}>\n` +
+                `${text}\n` +
+                `<end of message>`,
               delivery: "queue",
             })
             notified = true
@@ -296,7 +295,7 @@ export default Plugin.define({
           const from = ownID(toolCtx)
           const ticket = ticketID()
           const api = ctx.rpc(TA)
-          await api.send({ to, from, ticket, text: message, mode: blocking ? "blocking" : "notify", replyTo: from })
+          await api.send({ to, from, ticket, text: message, kind: "ask", mode: blocking ? "blocking" : "notify", replyTo: from })
           if (!blocking) {
             return { content: `queued to ${session} as ${ticket}. answer arrives as a [transatlantic] prompt; or check transatlantic_inbox(ticket=${ticket}).` }
           }
@@ -333,7 +332,7 @@ export default Plugin.define({
           const { session, message, ticket = ticketID() } = input as any
           const to = await resolveTarget(session)
           const api = ctx.rpc(TA)
-          await api.send({ to, from: ownID(toolCtx), ticket, text: message, mode: "notify", replyTo: ownID(toolCtx) })
+          await api.send({ to, from: ownID(toolCtx), ticket, text: message, kind: "post", mode: "notify", replyTo: ownID(toolCtx) })
           return { content: `queued to ${session} as ${ticket}` }
         },
       })

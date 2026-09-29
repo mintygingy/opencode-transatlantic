@@ -56,6 +56,19 @@ transatlantic_unregister(alias=backend)
 transatlantic_whoami()
 ```
 
+## Wire format
+
+Mail arrives as one plain queued message:
+
+```
+<transatlantic ask from backend · t_abc123>
+latest api contract?
+<end of message>
+```
+
+Kind is `ask` | `post` | `answer` (ask/answer = onetime exchange).
+Reply with `transatlantic_answer(ticket=t_abc123, ...)`.
+
 ## Rules
 
 - Mail never interrupts. A busy peer finishes its toolcall first.
