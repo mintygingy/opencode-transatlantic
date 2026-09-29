@@ -225,18 +225,19 @@ export default Plugin.define({
           ...prev, status: "done", answer: text, answeredBy: from, updated: Date.now(),
         })
         await registration.events.emit("message", { ticket, to: prev?.to ?? "", from })
-        // notify-back only for notify-mode tickets (blocking askers poll),
-        // and only on the first answer — re-answers update text, no re-notify.
+        // notify the conversation peer: whoever isn't answering. tickets are
+        // threads — every answer is a new message the other side is waiting
+        // for. no done-gate: follow-ups must deliver, not just the first reply.
+        // (blocking askers poll instead, so only notify-mode tickets notify.)
         let notified = false
-        const replyTo = prev.replyTo as string | undefined
-        const already = prev.status === "done"
-        if (!already && prev.mode === "notify" && replyTo && replyTo !== from) {
+        const peer = from === prev.to ? prev.from : prev.to
+        if (prev.mode === "notify" && peer && peer !== from) {
           try {
             const fromName = await nameOf(from)
             // plain chat message, same format. queued soft.
             await ctx.session.prompt({
-              sessionID: replyTo,
-              id: `msg_ta_${ticket}_n`,
+              sessionID: peer,
+              id: `msg_ta_${ticket}_n${Date.now().toString(36)}`,
               text:
                 `<transatlantic answer from ${fromName} · ${ticket}>\n` +
                 `${text}\n` +
@@ -244,7 +245,7 @@ export default Plugin.define({
               delivery: "queue",
             })
             notified = true
-          } catch { /* asker gone; answer stays in storage */ }
+          } catch { /* peer gone; answer stays in storage */ }
         }
         return { ok: true, notified }
       },
